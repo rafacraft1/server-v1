@@ -1,12 +1,22 @@
 #!/bin/bash
+# Skrip Instalasi LAMP/LEMP untuk Ubuntu
+# Menginstal Apache2, PHP, Composer, dan Database MySQL/PostgreSQL dengan konfigurasi aman
+# Versi: 1.2
+# Penulis: Indra Agustian
+
 # Konstanta Global
 PHP_VERSION="8.2"
 PHP_REPO="ppa:ondrej/php"
 INFO_PHP_PATH="/var/www/html/info.php"
 LOG_FILE="/var/log/setup_script.log"
+INSTALLED_COMPONENTS=()
 
 # Redirect output ke file log dengan timestamp
 exec > >(while read -r line; do echo "$(date '+%Y-%m-%d %H:%M:%S') - $line"; done | tee -a $LOG_FILE) 2>&1
+
+# Hentikan skrip jika terjadi error dan tambahkan trap untuk membersihkan jika diperlukan
+set -e
+trap "echo 'Error terjadi. Periksa log di $LOG_FILE'; exit 1" ERR
 
 # Fungsi untuk menampilkan pesan
 echo_message() {
@@ -24,10 +34,10 @@ show_progress() {
         echo -n "."
         sleep 1
     done
-    echo " Done!"
+    echo " Selesai!"
 }
 
-# Fungsi untuk validasi input
+# Fungsi validasi input
 read_input() {
     local prompt=$1
     local valid_input=$2
@@ -43,89 +53,53 @@ read_input() {
     done
 }
 
-# Fungsi pemeriksaan koneksi internet
+# Pemeriksaan koneksi internet
 check_internet() {
-    if ! ping -c 1 google.com &> /dev/null; then
+    if ! command -v ping &> /dev/null || ! ping -c 1 google.com &> /dev/null; then
         echo "Koneksi internet tidak tersedia. Periksa koneksi Anda dan coba lagi."
         exit 1
     fi
-}
-
-# Fungsi memeriksa dependency wajib
-check_dependencies() {
-    echo_message "Memeriksa dependency wajib..."
-    local dependencies=("curl" "software-properties-common")
-    for dep in "${dependencies[@]}"; do
-        if ! command -v $dep &>/dev/null; then
-            echo "Menginstal $dep..."
-            apt-get install -y $dep
-        fi
-    done
 }
 
 # Pemeriksaan awal
 pre_check() {
     echo_message "Melakukan pemeriksaan awal..."
 
-    # Cek apakah dijalankan sebagai root
     if [ "$(id -u)" -ne 0 ]; then
         echo "Harap jalankan skrip ini sebagai root (sudo)."
         exit 1
     fi
 
-    # Cek apakah sistem menggunakan Ubuntu
     if ! grep -iq "ubuntu" /etc/os-release; then
         echo "Sistem ini bukan Ubuntu. Skrip hanya mendukung Ubuntu Server."
         exit 1
     fi
 
-    # Cek koneksi internet
     check_internet
-
-    # Cek dependency
-    check_dependencies
 
     echo "Pemeriksaan awal selesai. Melanjutkan proses instalasi..."
 }
 
-# Fungsi untuk mengecek paket terinstal
-is_installed() {
-    dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q "install ok installed"
-}
-
-# Fungsi menambahkan PPA jika belum ada
-add_php_ppa() {
-    if ! grep -q "^deb .*$PHP_REPO" /etc/apt/sources.list /etc/apt/sources.list.d/*; then
-        echo "Menambahkan repositori PHP..."
-        add-apt-repository $PHP_REPO -y
-    else
-        echo "Repositori PHP sudah ditambahkan. Lewati."
-    fi
-}
-
-# Fungsi instalasi Apache2 dengan penanganan error dan hardening
+# Fungsi instalasi Apache2 dengan hardening
 install_apache2() {
     echo_message "Menginstal Apache2..."
     show_progress 3 "Proses instalasi Apache2 dimulai"
 
-    if is_installed "apache2"; then
+    if dpkg-query -W -f='${Status}' apache2 2>/dev/null | grep -q "install ok installed"; then
         echo "Apache2 sudah terinstal. Lewati instalasi."
     else
-        if ! apt-get update -y || ! apt-get install apache2 -y; then
-            echo "Gagal menginstal Apache2. Periksa koneksi internet dan coba lagi."
-            exit 1
-        fi
-
+        apt-get update -y
+        apt-get install apache2 -y
         systemctl start apache2
         systemctl enable apache2
+        INSTALLED_COMPONENTS+=("Apache2")
     fi
 
-    # Hardening Apache
-    echo "Options -Indexes" >> /etc/apache2/apache2.conf
+    if ! grep -q "Options -Indexes" /etc/apache2/apache2.conf; then
+        echo "Options -Indexes" >> /etc/apache2/apache2.conf
+    fi
     systemctl restart apache2
-    echo "Apache2 berhasil diinstal dan dikonfigurasi dengan hardening dasar."
 
-    # Validasi Apache berjalan
     if systemctl is-active --quiet apache2; then
         echo "Apache berjalan dengan benar."
     else
@@ -133,48 +107,54 @@ install_apache2() {
     fi
 }
 
-# Fungsi instalasi PHP8 dan modul
+# Fungsi instalasi PHP dan modul
 install_php8() {
     echo_message "Menginstal PHP${PHP_VERSION} dan modul tambahan..."
     show_progress 5 "Proses instalasi PHP dimulai"
 
-    # Tambah repositori PHP
-    add_php_ppa
-    apt-get update -y
-
-    if ! apt-get install php${PHP_VERSION} libapache2-mod-php${PHP_VERSION} php${PHP_VERSION}-cli php${PHP_VERSION}-fpm \
-        php${PHP_VERSION}-mysql php${PHP_VERSION}-xml php${PHP_VERSION}-curl php${PHP_VERSION}-gd \
-        php${PHP_VERSION}-mbstring php${PHP_VERSION}-zip php${PHP_VERSION}-bcmath php${PHP_VERSION}-pgsql -y; then
-        echo "Gagal menginstal PHP."
-        exit 1
+    if ! grep -q "^deb .*$PHP_REPO" /etc/apt/sources.list /etc/apt/sources.list.d/*; then
+        add-apt-repository $PHP_REPO -y
     fi
+    apt-get update -y
+    apt-get install -y php${PHP_VERSION} libapache2-mod-php${PHP_VERSION} php${PHP_VERSION}-{cli,fpm,mysql,xml,curl,gd,mbstring,zip,bcmath,pgsql}
 
     a2enmod php${PHP_VERSION}
     systemctl restart apache2
 
-    # Hardening PHP
-    sed -i 's/expose_php = On/expose_php = Off/' /etc/php/${PHP_VERSION}/apache2/php.ini
-    sed -i "s/;disable_functions =/disable_functions = exec,system,shell_exec,passthru,eval,phpinfo/" /etc/php/${PHP_VERSION}/apache2/php.ini
+    PHP_INI="/etc/php/${PHP_VERSION}/apache2/php.ini"
+    if [ -f "$PHP_INI" ]; then
+        sed -i 's/expose_php = On/expose_php = Off/' $PHP_INI
+        sed -i "s/;disable_functions =/disable_functions = exec,system,shell_exec,passthru,eval,phpinfo/" $PHP_INI
+    fi
 
     echo "PHP${PHP_VERSION} berhasil diinstal dan dikonfigurasi."
     php -v
+    INSTALLED_COMPONENTS+=("PHP ${PHP_VERSION}")
 }
 
-# Fungsi instalasi Composer dengan pemeriksaan curl
+# Fungsi instalasi Composer
 install_composer() {
     echo_message "Menginstal Composer..."
     show_progress 3 "Proses instalasi Composer dimulai"
 
+    # Cari pengguna non-root pertama yang ada di sistem
+    NON_ROOT_USER=$(id -u -n 1000 2>/dev/null || getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 {print $1; exit}')
+    if [ -z "$NON_ROOT_USER" ]; then
+        echo "Tidak ditemukan pengguna non-root di sistem. Harap buat pengguna non-root terlebih dahulu."
+        exit 1
+    fi
+
     if ! command -v curl >/dev/null 2>&1; then
-        echo "curl tidak ditemukan. Menginstal curl..."
         apt-get install curl -y
     fi
 
-    curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+    # Instal Composer ke home directory pengguna non-root
+    sudo -u "$NON_ROOT_USER" bash -c "curl -sS https://getcomposer.org/installer | php -- --install-dir=/home/$NON_ROOT_USER/.local/bin --filename=composer"
 
     if [ $? -eq 0 ]; then
-        echo_message "Composer berhasil diinstal. Versi Composer:"
-        composer --version
+        echo_message "Composer berhasil diinstal untuk pengguna '$NON_ROOT_USER'. Versi Composer:"
+        sudo -u "$NON_ROOT_USER" bash -c "/home/$NON_ROOT_USER/.local/bin/composer --version"
+        INSTALLED_COMPONENTS+=("Composer")
     else
         echo "Gagal menginstal Composer."
         exit 1
@@ -186,16 +166,13 @@ install_mysql() {
     echo_message "Menginstal MySQL..."
     show_progress 4 "Proses instalasi MySQL dimulai"
 
-    if systemctl is-active --quiet mysql; then
-        echo "MySQL sudah berjalan. Lewati instalasi."
-        return
+    if ! dpkg-query -W -f='${Status}' mysql-server 2>/dev/null | grep -q "install ok installed"; then
+        apt-get update -y && apt-get install mysql-server -y
+        systemctl start mysql
+        systemctl enable mysql
+        INSTALLED_COMPONENTS+=("MySQL")
     fi
 
-    apt-get update -y && apt-get install mysql-server -y
-    systemctl start mysql
-    systemctl enable mysql
-
-    # Amankan instalasi MySQL
     echo "Mengamankan instalasi MySQL..."
     mysql_secure_installation <<EOF
 n
@@ -208,61 +185,17 @@ EOF
     echo "MySQL berhasil diinstal dan diamankan."
 }
 
-# Fungsi instalasi PostgreSQL
-install_postgresql() {
-    echo_message "Menginstal PostgreSQL..."
-    show_progress 4 "Proses instalasi PostgreSQL dimulai"
-
-    if systemctl is-active --quiet postgresql; then
-        echo "PostgreSQL sudah berjalan. Lewati instalasi."
-        return
-    fi
-
-    apt-get update -y && apt-get install postgresql postgresql-contrib -y
-    systemctl start postgresql
-    systemctl enable postgresql
-
-    echo "PostgreSQL berhasil diinstal dan dijalankan."
-}
-
 # Fungsi membuat file info.php
 create_info_php() {
     echo_message "Membuat file info.php untuk pengujian PHP..."
-    echo "<?php phpinfo(); ?>" > $INFO_PHP_PATH
-    echo "File info.php telah dibuat di $INFO_PHP_PATH"
-    echo "Akses melalui: http://<alamat-ip-server>/info.php"
-}
 
-# Fungsi pengecekan status layanan
-check_services_status() {
-    echo_message "Pengecekan Status Layanan"
-
-    # Cek status Apache
-    if systemctl is-active --quiet apache2; then
-        echo "Apache2: BERJALAN"
+    if [ -d "$(dirname $INFO_PHP_PATH)" ]; then
+        echo "<?php phpinfo(); ?>" > $INFO_PHP_PATH
+        echo "File info.php telah dibuat di $INFO_PHP_PATH"
+        echo "Akses melalui: http://<alamat-ip-server>/info.php"
+        INSTALLED_COMPONENTS+=("File info.php")
     else
-        echo "Apache2: TIDAK BERJALAN"
-    fi
-
-    # Cek status PHP
-    if php -v &>/dev/null; then
-        echo "PHP${PHP_VERSION}: TERINSTAL"
-    else
-        echo "PHP${PHP_VERSION}: TIDAK TERINSTAL"
-    fi
-
-    # Cek status MySQL
-    if systemctl is-active --quiet mysql; then
-        echo "MySQL: BERJALAN"
-    else
-        echo "MySQL: TIDAK BERJALAN"
-    fi
-
-    # Cek status PostgreSQL
-    if systemctl is-active --quiet postgresql; then
-        echo "PostgreSQL: BERJALAN"
-    else
-        echo "PostgreSQL: TIDAK BERJALAN"
+        echo "Direktori tujuan tidak ditemukan. Pastikan Apache telah terinstal."
     fi
 }
 
@@ -271,22 +204,23 @@ install_all() {
     install_apache2
     install_php8
     install_composer
-
-    # Pilih database
-    db_choice=$(read_input "Pilih database: 1) MySQL 2) PostgreSQL: " "^[12]$")
-    case $db_choice in
-        1) install_mysql ;;
-        2) install_postgresql ;;
-    esac
-
+    install_mysql
     create_info_php
 
-    # Membersihkan cache apt
     apt-get clean
     apt-get autoremove -y
 
-    check_services_status
     echo_message "Proses instalasi selesai dengan sukses."
+}
+
+# Fungsi untuk menampilkan laporan akhir
+show_report() {
+    echo_message "Laporan Instalasi Akhir"
+    echo "Komponen yang telah diinstal:"
+    for component in "${INSTALLED_COMPONENTS[@]}"; do
+        echo "- $component"
+    done
+    echo "\nTerima kasih telah menggunakan skrip ini."
 }
 
 # Menu utama
@@ -299,10 +233,10 @@ main_menu() {
         echo "1) Instal Apache2"
         echo "2) Instal PHP${PHP_VERSION}"
         echo "3) Instal Composer"
-        echo "4) Instal Database (MySQL/PostgreSQL)"
+        echo "4) Instal MySQL"
         echo "5) Buat file info.php"
         echo "6) Instal Semua Komponen"
-        echo "7) Cek Status Layanan"
+        echo "7) Tampilkan Laporan Instalasi"
         echo "8) Keluar"
         option=$(read_input "Pilih opsi (1-8): " "^[1-8]$")
 
@@ -310,14 +244,12 @@ main_menu() {
             1) install_apache2 ;;
             2) install_php8 ;;
             3) install_composer ;;
-            4)
-                db_choice=$(read_input "Pilih database: 1) MySQL 2) PostgreSQL: " "^[12]$")
-                [[ $db_choice == "1" ]] && install_mysql || install_postgresql
-                ;;
+            4) install_mysql ;;
             5) create_info_php ;;
             6) install_all ;;
-            7) check_services_status ;;
+            7) show_report ;;
             8)
+                show_report
                 echo_message "Terima kasih telah menggunakan skrip ini. Keluar..."
                 exit 0
                 ;;
