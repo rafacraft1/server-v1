@@ -1,8 +1,8 @@
 #!/bin/bash
 # Skrip Instalasi LAMP/LEMP untuk Ubuntu
 # Menginstal Apache2, PHP, Composer, dan Database MySQL/PostgreSQL dengan konfigurasi aman
-# Versi: 1.2
-# Penulis: Indra Agustian
+# Versi: 1.3
+# Penulis: [Nama Anda]
 
 # Konstanta Global
 PHP_VERSION="8.2"
@@ -138,22 +138,31 @@ install_composer() {
     show_progress 3 "Proses instalasi Composer dimulai"
 
     # Cari pengguna non-root pertama yang ada di sistem
-    NON_ROOT_USER=$(id -u -n 1000 2>/dev/null || getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 {print $1; exit}')
-    if [ -z "$NON_ROOT_USER" ]; then
-        echo "Tidak ditemukan pengguna non-root di sistem. Harap buat pengguna non-root terlebih dahulu."
-        exit 1
-    fi
+    NON_ROOT_USERS=$(getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 {print $1}')
+    echo "Pengguna non-root yang tersedia:"
+    select NON_ROOT_USER in $NON_ROOT_USERS; do
+        if [ -n "$NON_ROOT_USER" ]; then
+            break
+        fi
+        echo "Pilihan tidak valid. Coba lagi."
+    done
 
     if ! command -v curl >/dev/null 2>&1; then
         apt-get install curl -y
     fi
 
+    # Pastikan direktori tujuan ada
+    TARGET_DIR="/home/$NON_ROOT_USER/.local/bin"
+    if [ ! -d "$TARGET_DIR" ]; then
+        sudo -u "$NON_ROOT_USER" mkdir -p "$TARGET_DIR"
+    fi
+
     # Instal Composer ke home directory pengguna non-root
-    sudo -u "$NON_ROOT_USER" bash -c "curl -sS https://getcomposer.org/installer | php -- --install-dir=/home/$NON_ROOT_USER/.local/bin --filename=composer"
+    sudo -u "$NON_ROOT_USER" bash -c "curl -sS https://getcomposer.org/installer | php -- --install-dir=$TARGET_DIR --filename=composer"
 
     if [ $? -eq 0 ]; then
         echo_message "Composer berhasil diinstal untuk pengguna '$NON_ROOT_USER'. Versi Composer:"
-        sudo -u "$NON_ROOT_USER" bash -c "/home/$NON_ROOT_USER/.local/bin/composer --version"
+        sudo -u "$NON_ROOT_USER" bash -c "$TARGET_DIR/composer --version"
         INSTALLED_COMPONENTS+=("Composer")
     else
         echo "Gagal menginstal Composer."
@@ -174,13 +183,7 @@ install_mysql() {
     fi
 
     echo "Mengamankan instalasi MySQL..."
-    mysql_secure_installation <<EOF
-n
-y
-y
-y
-y
-EOF
+    mysql_secure_installation
 
     echo "MySQL berhasil diinstal dan diamankan."
 }
@@ -193,6 +196,7 @@ create_info_php() {
         echo "<?php phpinfo(); ?>" > $INFO_PHP_PATH
         echo "File info.php telah dibuat di $INFO_PHP_PATH"
         echo "Akses melalui: http://<alamat-ip-server>/info.php"
+        echo "CATATAN: Hapus file info.php setelah pengujian selesai untuk keamanan."
         INSTALLED_COMPONENTS+=("File info.php")
     else
         echo "Direktori tujuan tidak ditemukan. Pastikan Apache telah terinstal."
@@ -220,7 +224,18 @@ show_report() {
     for component in "${INSTALLED_COMPONENTS[@]}"; do
         echo "- $component"
     done
+    echo "\nVersi komponen:"
+    apache2 -v | grep "Server version"
+    php -v | head -n 1
+    mysql --version
     echo "\nTerima kasih telah menggunakan skrip ini."
+
+    # Periksa dan hapus file info.php jika ada
+    if [ -f "$INFO_PHP_PATH" ]; then
+        echo "Menghapus file info.php untuk keamanan..."
+        rm -f "$INFO_PHP_PATH"
+        echo "File info.php berhasil dihapus."
+    fi
 }
 
 # Menu utama
