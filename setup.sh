@@ -5,8 +5,8 @@ PHP_REPO="ppa:ondrej/php"
 INFO_PHP_PATH="/var/www/html/info.php"
 LOG_FILE="/var/log/setup_script.log"
 
-# Redirect output ke file log
-exec > >(tee -a $LOG_FILE) 2>&1
+# Redirect output ke file log dengan timestamp
+exec > >(while read -r line; do echo "$(date '+%Y-%m-%d %H:%M:%S') - $line"; done | tee -a $LOG_FILE) 2>&1
 
 # Fungsi untuk menampilkan pesan
 echo_message() {
@@ -51,6 +51,18 @@ check_internet() {
     fi
 }
 
+# Fungsi memeriksa dependency wajib
+check_dependencies() {
+    echo_message "Memeriksa dependency wajib..."
+    local dependencies=("curl" "software-properties-common")
+    for dep in "${dependencies[@]}"; do
+        if ! command -v $dep &>/dev/null; then
+            echo "Menginstal $dep..."
+            apt-get install -y $dep
+        fi
+    done
+}
+
 # Pemeriksaan awal
 pre_check() {
     echo_message "Melakukan pemeriksaan awal..."
@@ -70,12 +82,25 @@ pre_check() {
     # Cek koneksi internet
     check_internet
 
+    # Cek dependency
+    check_dependencies
+
     echo "Pemeriksaan awal selesai. Melanjutkan proses instalasi..."
 }
 
 # Fungsi untuk mengecek paket terinstal
 is_installed() {
     dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q "install ok installed"
+}
+
+# Fungsi menambahkan PPA jika belum ada
+add_php_ppa() {
+    if ! grep -q "^deb .*$PHP_REPO" /etc/apt/sources.list /etc/apt/sources.list.d/*; then
+        echo "Menambahkan repositori PHP..."
+        add-apt-repository $PHP_REPO -y
+    else
+        echo "Repositori PHP sudah ditambahkan. Lewati."
+    fi
 }
 
 # Fungsi instalasi Apache2 dengan penanganan error dan hardening
@@ -114,8 +139,7 @@ install_php8() {
     show_progress 5 "Proses instalasi PHP dimulai"
 
     # Tambah repositori PHP
-    apt-get install software-properties-common -y
-    add-apt-repository $PHP_REPO -y
+    add_php_ppa
     apt-get update -y
 
     if ! apt-get install php${PHP_VERSION} libapache2-mod-php${PHP_VERSION} php${PHP_VERSION}-cli php${PHP_VERSION}-fpm \
@@ -130,6 +154,8 @@ install_php8() {
 
     # Hardening PHP
     sed -i 's/expose_php = On/expose_php = Off/' /etc/php/${PHP_VERSION}/apache2/php.ini
+    sed -i "s/;disable_functions =/disable_functions = exec,system,shell_exec,passthru,eval,phpinfo/" /etc/php/${PHP_VERSION}/apache2/php.ini
+
     echo "PHP${PHP_VERSION} berhasil diinstal dan dikonfigurasi."
     php -v
 }
@@ -160,6 +186,11 @@ install_mysql() {
     echo_message "Menginstal MySQL..."
     show_progress 4 "Proses instalasi MySQL dimulai"
 
+    if systemctl is-active --quiet mysql; then
+        echo "MySQL sudah berjalan. Lewati instalasi."
+        return
+    fi
+
     apt-get update -y && apt-get install mysql-server -y
     systemctl start mysql
     systemctl enable mysql
@@ -181,6 +212,11 @@ EOF
 install_postgresql() {
     echo_message "Menginstal PostgreSQL..."
     show_progress 4 "Proses instalasi PostgreSQL dimulai"
+
+    if systemctl is-active --quiet postgresql; then
+        echo "PostgreSQL sudah berjalan. Lewati instalasi."
+        return
+    fi
 
     apt-get update -y && apt-get install postgresql postgresql-contrib -y
     systemctl start postgresql
