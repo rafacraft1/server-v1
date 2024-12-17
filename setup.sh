@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Skrip Interaktif Instalasi Apache2, PHP8, dan Composer untuk Ubuntu Server
-# Penulis: [Nama Anda atau Kosong]
+# Skrip Instalasi Apache2, PHP8, dan Composer untuk Ubuntu Server
+# Penulis: Indra Agustian
 # Tanggal: $(date)
 
 # Fungsi untuk menampilkan pesan
