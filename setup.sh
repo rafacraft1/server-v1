@@ -43,6 +43,14 @@ read_input() {
     done
 }
 
+# Fungsi pemeriksaan koneksi internet
+check_internet() {
+    if ! ping -c 1 google.com &> /dev/null; then
+        echo "Koneksi internet tidak tersedia. Periksa koneksi Anda dan coba lagi."
+        exit 1
+    fi
+}
+
 # Pemeriksaan awal
 pre_check() {
     echo_message "Melakukan pemeriksaan awal..."
@@ -59,12 +67,15 @@ pre_check() {
         exit 1
     fi
 
+    # Cek koneksi internet
+    check_internet
+
     echo "Pemeriksaan awal selesai. Melanjutkan proses instalasi..."
 }
 
 # Fungsi untuk mengecek paket terinstal
 is_installed() {
-    dpkg -l | grep -q "$1"
+    dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q "install ok installed"
 }
 
 # Fungsi instalasi Apache2 dengan penanganan error dan hardening
@@ -75,7 +86,7 @@ install_apache2() {
     if is_installed "apache2"; then
         echo "Apache2 sudah terinstal. Lewati instalasi."
     else
-        if ! apt update -y || ! apt install apache2 -y; then
+        if ! apt-get update -y || ! apt-get install apache2 -y; then
             echo "Gagal menginstal Apache2. Periksa koneksi internet dan coba lagi."
             exit 1
         fi
@@ -89,11 +100,11 @@ install_apache2() {
     systemctl restart apache2
     echo "Apache2 berhasil diinstal dan dikonfigurasi dengan hardening dasar."
 
-    # Validasi Apache berjalan di port 80
-    if ! ss -tulpn | grep ':80 ' >/dev/null; then
-        echo "Peringatan: Apache tidak mendengarkan pada port 80. Periksa konfigurasi Apache."
+    # Validasi Apache berjalan
+    if systemctl is-active --quiet apache2; then
+        echo "Apache berjalan dengan benar."
     else
-        echo "Apache berjalan dengan benar di port 80."
+        echo "Apache tidak berjalan. Periksa konfigurasi Anda."
     fi
 }
 
@@ -103,11 +114,11 @@ install_php8() {
     show_progress 5 "Proses instalasi PHP dimulai"
 
     # Tambah repositori PHP
-    apt install software-properties-common -y
+    apt-get install software-properties-common -y
     add-apt-repository $PHP_REPO -y
-    apt update -y
+    apt-get update -y
 
-    if ! apt install php${PHP_VERSION} libapache2-mod-php${PHP_VERSION} php${PHP_VERSION}-cli php${PHP_VERSION}-fpm \
+    if ! apt-get install php${PHP_VERSION} libapache2-mod-php${PHP_VERSION} php${PHP_VERSION}-cli php${PHP_VERSION}-fpm \
         php${PHP_VERSION}-mysql php${PHP_VERSION}-xml php${PHP_VERSION}-curl php${PHP_VERSION}-gd \
         php${PHP_VERSION}-mbstring php${PHP_VERSION}-zip php${PHP_VERSION}-bcmath php${PHP_VERSION}-pgsql -y; then
         echo "Gagal menginstal PHP."
@@ -130,7 +141,7 @@ install_composer() {
 
     if ! command -v curl >/dev/null 2>&1; then
         echo "curl tidak ditemukan. Menginstal curl..."
-        apt install curl -y
+        apt-get install curl -y
     fi
 
     curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
@@ -149,7 +160,7 @@ install_mysql() {
     echo_message "Menginstal MySQL..."
     show_progress 4 "Proses instalasi MySQL dimulai"
 
-    apt update -y && apt install mysql-server -y
+    apt-get update -y && apt-get install mysql-server -y
     systemctl start mysql
     systemctl enable mysql
 
@@ -171,7 +182,7 @@ install_postgresql() {
     echo_message "Menginstal PostgreSQL..."
     show_progress 4 "Proses instalasi PostgreSQL dimulai"
 
-    apt update -y && apt install postgresql postgresql-contrib -y
+    apt-get update -y && apt-get install postgresql postgresql-contrib -y
     systemctl start postgresql
     systemctl enable postgresql
 
@@ -200,6 +211,12 @@ install_all() {
     esac
 
     create_info_php
+
+    # Membersihkan cache apt
+    apt-get clean
+    apt-get autoremove -y
+
+    echo_message "Proses instalasi selesai dengan sukses."
 }
 
 # Menu utama
