@@ -1,4 +1,13 @@
 #!/bin/bash
+# Konstanta Global
+PHP_VERSION="8.2"
+PHP_REPO="ppa:ondrej/php"
+INFO_PHP_PATH="/var/www/html/info.php"
+LOG_FILE="/var/log/setup_script.log"
+
+# Redirect output ke file log
+exec > >(tee -a $LOG_FILE) 2>&1
+
 # Fungsi untuk menampilkan pesan
 echo_message() {
     echo "============================================"
@@ -18,7 +27,23 @@ show_progress() {
     echo " Done!"
 }
 
-# Fungsi untuk pemeriksaan awal
+# Fungsi untuk validasi input
+read_input() {
+    local prompt=$1
+    local valid_input=$2
+    local input
+    while true; do
+        read -p "$prompt" input
+        if [[ "$input" =~ $valid_input ]]; then
+            echo "$input"
+            return
+        else
+            echo "Input tidak valid. Harap coba lagi."
+        fi
+    done
+}
+
+# Pemeriksaan awal
 pre_check() {
     echo_message "Melakukan pemeriksaan awal..."
 
@@ -37,98 +62,116 @@ pre_check() {
     echo "Pemeriksaan awal selesai. Melanjutkan proses instalasi..."
 }
 
-# Fungsi untuk instalasi Apache2
+# Fungsi untuk mengecek paket terinstal
+is_installed() {
+    dpkg -l | grep -q "$1"
+}
+
+# Fungsi instalasi Apache2 dengan penanganan error dan hardening
 install_apache2() {
     echo_message "Menginstal Apache2..."
     show_progress 3 "Proses instalasi Apache2 dimulai"
-    apt update -y && apt install apache2 -y
-    systemctl start apache2
-    systemctl enable apache2
-    echo "Apache2 berhasil diinstal dan dijalankan."
+
+    if is_installed "apache2"; then
+        echo "Apache2 sudah terinstal. Lewati instalasi."
+    else
+        if ! apt update -y || ! apt install apache2 -y; then
+            echo "Gagal menginstal Apache2. Periksa koneksi internet dan coba lagi."
+            exit 1
+        fi
+
+        systemctl start apache2
+        systemctl enable apache2
+    fi
+
+    # Hardening Apache
+    echo "Options -Indexes" >> /etc/apache2/apache2.conf
+    systemctl restart apache2
+    echo "Apache2 berhasil diinstal dan dikonfigurasi dengan hardening dasar."
+
+    # Validasi Apache berjalan di port 80
+    if ! ss -tulpn | grep ':80 ' >/dev/null; then
+        echo "Peringatan: Apache tidak mendengarkan pada port 80. Periksa konfigurasi Apache."
+    else
+        echo "Apache berjalan dengan benar di port 80."
+    fi
 }
 
-# Fungsi untuk instalasi PHP8 dan modul
+# Fungsi instalasi PHP8 dan modul
 install_php8() {
-    echo_message "Menambahkan repositori PHP8..."
-    show_progress 2 "Menambahkan repositori PHP8"
+    echo_message "Menginstal PHP${PHP_VERSION} dan modul tambahan..."
+    show_progress 5 "Proses instalasi PHP dimulai"
+
+    # Tambah repositori PHP
     apt install software-properties-common -y
-    add-apt-repository ppa:ondrej/php -y
+    add-apt-repository $PHP_REPO -y
     apt update -y
 
-    echo_message "Menginstal PHP8 dan modul tambahan..."
-    show_progress 5 "Proses instalasi PHP8 dimulai"
-    apt install php8.2 libapache2-mod-php8.2 php8.2-cli php8.2-fpm \
-        php8.2-mysql php8.2-xml php8.2-curl php8.2-gd \
-        php8.2-mbstring php8.2-zip php8.2-bcmath php8.2-pgsql -y
+    if ! apt install php${PHP_VERSION} libapache2-mod-php${PHP_VERSION} php${PHP_VERSION}-cli php${PHP_VERSION}-fpm \
+        php${PHP_VERSION}-mysql php${PHP_VERSION}-xml php${PHP_VERSION}-curl php${PHP_VERSION}-gd \
+        php${PHP_VERSION}-mbstring php${PHP_VERSION}-zip php${PHP_VERSION}-bcmath php${PHP_VERSION}-pgsql -y; then
+        echo "Gagal menginstal PHP."
+        exit 1
+    fi
 
-    a2enmod php8.2
+    a2enmod php${PHP_VERSION}
     systemctl restart apache2
 
-    # Menampilkan versi PHP
-    echo_message "PHP8 berhasil diinstal. Versi PHP:"
+    # Hardening PHP
+    sed -i 's/expose_php = On/expose_php = Off/' /etc/php/${PHP_VERSION}/apache2/php.ini
+    echo "PHP${PHP_VERSION} berhasil diinstal dan dikonfigurasi."
     php -v
-
-    # Menampilkan ekstensi PHP yang aktif
-    echo_message "Daftar ekstensi PHP yang aktif:"
-    php -m
 }
 
-# Fungsi untuk instalasi Composer
+# Fungsi instalasi Composer dengan pemeriksaan curl
 install_composer() {
     echo_message "Menginstal Composer..."
     show_progress 3 "Proses instalasi Composer dimulai"
 
-    # Unduh installer Composer
-    curl -sS https://getcomposer.org/installer | php8.2 --install-dir=/usr/local/bin --filename=composer
+    if ! command -v curl >/dev/null 2>&1; then
+        echo "curl tidak ditemukan. Menginstal curl..."
+        apt install curl -y
+    fi
 
-    # Verifikasi instalasi Composer
+    curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+
     if [ $? -eq 0 ]; then
         echo_message "Composer berhasil diinstal. Versi Composer:"
         composer --version
     else
-        echo_message "Gagal menginstal Composer."
+        echo "Gagal menginstal Composer."
         exit 1
     fi
 }
 
-# Fungsi untuk instalasi MySQL
+# Fungsi instalasi MySQL
 install_mysql() {
     echo_message "Menginstal MySQL..."
     show_progress 4 "Proses instalasi MySQL dimulai"
 
-    # Instalasi MySQL Server
-    apt update -y
-    apt install mysql-server -y
-
-    # Menjalankan dan mengaktifkan MySQL
+    apt update -y && apt install mysql-server -y
     systemctl start mysql
     systemctl enable mysql
 
-    # Mengamankan instalasi MySQL
-    mysql_secure_installation
+    # Amankan instalasi MySQL
+    echo "Mengamankan instalasi MySQL..."
+    mysql_secure_installation <<EOF
+n
+y
+y
+y
+y
+EOF
 
-    echo "MySQL berhasil diinstal dan dijalankan."
-
-    # Menginstal ekstensi MySQL untuk PHP8
-    echo_message "Menginstal ekstensi MySQL untuk PHP8..."
-    apt install php8.2-mysql -y
-
-    # Restart Apache agar ekstensi PHP MySQL aktif
-    systemctl restart apache2
-
-    echo "Ekstensi MySQL untuk PHP8 berhasil diinstal."
+    echo "MySQL berhasil diinstal dan diamankan."
 }
 
-# Fungsi untuk instalasi PostgreSQL
+# Fungsi instalasi PostgreSQL
 install_postgresql() {
     echo_message "Menginstal PostgreSQL..."
     show_progress 4 "Proses instalasi PostgreSQL dimulai"
 
-    # Instalasi PostgreSQL Server
-    apt update -y
-    apt install postgresql postgresql-contrib -y
-
-    # Menjalankan dan mengaktifkan PostgreSQL
+    apt update -y && apt install postgresql postgresql-contrib -y
     systemctl start postgresql
     systemctl enable postgresql
 
@@ -138,117 +181,60 @@ install_postgresql() {
 # Fungsi membuat file info.php
 create_info_php() {
     echo_message "Membuat file info.php untuk pengujian PHP..."
-    echo "<?php phpinfo(); ?>" > /var/www/html/info.php
-    echo "File info.php telah dibuat di /var/www/html/info.php"
+    echo "<?php phpinfo(); ?>" > $INFO_PHP_PATH
+    echo "File info.php telah dibuat di $INFO_PHP_PATH"
     echo "Akses melalui: http://<alamat-ip-server>/info.php"
 }
 
-# Fungsi untuk menginstal semua komponen
+# Fungsi instal semua komponen
 install_all() {
-    echo_message "Memulai instalasi semua komponen (Apache2, PHP8, Composer, dan Database)..."
-    
-    # Instal Apache2
     install_apache2
-    
-    # Instal PHP8 dan modul
     install_php8
-
-    # Instal Composer
     install_composer
 
-    # Pilih database untuk diinstal (MySQL atau PostgreSQL)
-    read -p "Pilih database untuk diinstal (1) MySQL (2) PostgreSQL: " db_choice
+    # Pilih database
+    db_choice=$(read_input "Pilih database: 1) MySQL 2) PostgreSQL: " "^[12]$")
     case $db_choice in
-        1)
-            install_mysql
-            ;;
-        2)
-            install_postgresql
-            ;;
-        *)
-            echo "Pilihan tidak valid. Menghentikan instalasi database."
-            ;;
+        1) install_mysql ;;
+        2) install_postgresql ;;
     esac
 
-    # Membuat file info.php untuk pengujian PHP
     create_info_php
-
-    echo_message "Instalasi semua komponen selesai!"
 }
 
-# Fungsi untuk menampilkan menu utama
+# Menu utama
 main_menu() {
-    echo_message "Selamat datang di Skrip Instalasi Apache2, PHP8, Composer, dan Database Interaktif"
-
-    # Pemeriksaan awal
+    echo_message "Selamat datang di Skrip Instalasi Apache2, PHP${PHP_VERSION}, Composer, dan Database"
     pre_check
 
     while true; do
-        # Menampilkan pilihan menu
         echo_message "Menu Instalasi:"
         echo "1) Instal Apache2"
-        echo "2) Instal PHP8 dan Modul terkait"
+        echo "2) Instal PHP${PHP_VERSION}"
         echo "3) Instal Composer"
-        echo "4) Pilih dan Instal Database (MySQL/PostgreSQL)"
-        echo "5) Buat file info.php untuk pengujian PHP"
-        echo "6) Instal Semua Komponen (Apache2, PHP8, Composer, Database)"
+        echo "4) Instal Database (MySQL/PostgreSQL)"
+        echo "5) Buat file info.php"
+        echo "6) Instal Semua Komponen"
         echo "7) Keluar"
-        read -p "Pilih opsi (1-7): " option
+        option=$(read_input "Pilih opsi (1-7): " "^[1-7]$")
 
         case $option in
-            1)
-                echo_message "Anda memilih untuk menginstal Apache2."
-                install_apache2
-                ;;
-            2)
-                echo_message "Anda memilih untuk menginstal PHP8 beserta modulnya."
-                install_php8
-                ;;
-            3)
-                echo_message "Anda memilih untuk menginstal Composer."
-                install_composer
-                ;;
+            1) install_apache2 ;;
+            2) install_php8 ;;
+            3) install_composer ;;
             4)
-                echo_message "Anda memilih untuk memilih dan menginstal database."
-                # Pilih MySQL atau PostgreSQL
-                read -p "Pilih database untuk diinstal (1) MySQL (2) PostgreSQL: " db_choice
-                case $db_choice in
-                    1)
-                        install_mysql
-                        ;;
-                    2)
-                        install_postgresql
-                        ;;
-                    *)
-                        echo "Pilihan tidak valid. Kembali ke menu utama."
-                        ;;
-                esac
+                db_choice=$(read_input "Pilih database: 1) MySQL 2) PostgreSQL: " "^[12]$")
+                [[ $db_choice == "1" ]] && install_mysql || install_postgresql
                 ;;
-            5)
-                echo_message "Anda memilih untuk membuat file info.php."
-                create_info_php
-                ;;
-            6)
-                echo_message "Anda memilih untuk menginstal semua komponen."
-                install_all
-                ;;
+            5) create_info_php ;;
+            6) install_all ;;
             7)
                 echo_message "Terima kasih telah menggunakan skrip ini. Keluar..."
                 exit 0
                 ;;
-            *)
-                echo "Pilihan tidak valid. Silakan pilih antara 1-7."
-                ;;
         esac
-
-        # Tanyakan apakah pengguna ingin melakukan lebih banyak instalasi
-        read -p "Apakah Anda ingin melakukan instalasi lain? (y/n): " continue_choice
-        if [[ "$continue_choice" != "y" && "$continue_choice" != "Y" ]]; then
-            echo_message "Terima kasih telah menggunakan skrip ini. Keluar..."
-            exit 0
-        fi
     done
 }
 
-# Menjalankan fungsi utama
+# Menjalankan menu utama
 main_menu
