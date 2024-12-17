@@ -148,6 +148,39 @@ create_info_php() {
     echo "Akses melalui: http://<alamat-ip-server>/info.php"
 }
 
+# Fungsi untuk menginstal semua komponen
+install_all() {
+    echo_message "Memulai instalasi semua komponen (Apache2, PHP8, Composer, dan Database)..."
+    
+    # Instal Apache2
+    install_apache2
+    
+    # Instal PHP8 dan modul
+    install_php8
+
+    # Instal Composer
+    install_composer
+
+    # Pilih database untuk diinstal (MySQL atau PostgreSQL)
+    read -p "Pilih database untuk diinstal (1) MySQL (2) PostgreSQL: " db_choice
+    case $db_choice in
+        1)
+            install_mysql
+            ;;
+        2)
+            install_postgresql
+            ;;
+        *)
+            echo "Pilihan tidak valid. Menghentikan instalasi database."
+            ;;
+    esac
+
+    # Membuat file info.php untuk pengujian PHP
+    create_info_php
+
+    echo_message "Instalasi semua komponen selesai!"
+}
+
 # Fungsi untuk menampilkan menu utama
 main_menu() {
     echo_message "Selamat datang di Skrip Instalasi Apache2, PHP8, Composer, dan Database Interaktif"
@@ -163,8 +196,9 @@ main_menu() {
         echo "3) Instal Composer"
         echo "4) Pilih dan Instal Database (MySQL/PostgreSQL)"
         echo "5) Buat file info.php untuk pengujian PHP"
-        echo "6) Keluar"
-        read -p "Pilih opsi (1-6): " option
+        echo "6) Instal Semua Komponen (Apache2, PHP8, Composer, Database)"
+        echo "7) Keluar"
+        read -p "Pilih opsi (1-7): " option
 
         case $option in
             1)
@@ -200,11 +234,15 @@ main_menu() {
                 create_info_php
                 ;;
             6)
+                echo_message "Anda memilih untuk menginstal semua komponen."
+                install_all
+                ;;
+            7)
                 echo_message "Terima kasih telah menggunakan skrip ini. Keluar..."
                 exit 0
                 ;;
             *)
-                echo "Pilihan tidak valid. Silakan pilih antara 1-6."
+                echo "Pilihan tidak valid. Silakan pilih antara 1-7."
                 ;;
         esac
 
