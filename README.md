@@ -1,2 +1,2 @@
 # server-v1
-Setup Webserper Server Pertama kali
+Setup WebServer Pertama kali
