@@ -1,9 +1,4 @@
 #!/bin/bash
-
-# Skrip Interaktif Instalasi Apache2, PHP8, Composer, dan Database untuk Ubuntu Server
-# Penulis: Indra Agustian
-# Tanggal: $(date)
-
 # Fungsi untuk menampilkan pesan
 echo_message() {
     echo "============================================"
