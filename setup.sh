@@ -233,6 +233,39 @@ create_info_php() {
     echo "Akses melalui: http://<alamat-ip-server>/info.php"
 }
 
+# Fungsi pengecekan status layanan
+check_services_status() {
+    echo_message "Pengecekan Status Layanan"
+
+    # Cek status Apache
+    if systemctl is-active --quiet apache2; then
+        echo "Apache2: BERJALAN"
+    else
+        echo "Apache2: TIDAK BERJALAN"
+    fi
+
+    # Cek status PHP
+    if php -v &>/dev/null; then
+        echo "PHP${PHP_VERSION}: TERINSTAL"
+    else
+        echo "PHP${PHP_VERSION}: TIDAK TERINSTAL"
+    fi
+
+    # Cek status MySQL
+    if systemctl is-active --quiet mysql; then
+        echo "MySQL: BERJALAN"
+    else
+        echo "MySQL: TIDAK BERJALAN"
+    fi
+
+    # Cek status PostgreSQL
+    if systemctl is-active --quiet postgresql; then
+        echo "PostgreSQL: BERJALAN"
+    else
+        echo "PostgreSQL: TIDAK BERJALAN"
+    fi
+}
+
 # Fungsi instal semua komponen
 install_all() {
     install_apache2
@@ -252,6 +285,7 @@ install_all() {
     apt-get clean
     apt-get autoremove -y
 
+    check_services_status
     echo_message "Proses instalasi selesai dengan sukses."
 }
 
@@ -268,8 +302,9 @@ main_menu() {
         echo "4) Instal Database (MySQL/PostgreSQL)"
         echo "5) Buat file info.php"
         echo "6) Instal Semua Komponen"
-        echo "7) Keluar"
-        option=$(read_input "Pilih opsi (1-7): " "^[1-7]$")
+        echo "7) Cek Status Layanan"
+        echo "8) Keluar"
+        option=$(read_input "Pilih opsi (1-8): " "^[1-8]$")
 
         case $option in
             1) install_apache2 ;;
@@ -281,7 +316,8 @@ main_menu() {
                 ;;
             5) create_info_php ;;
             6) install_all ;;
-            7)
+            7) check_services_status ;;
+            8)
                 echo_message "Terima kasih telah menggunakan skrip ini. Keluar..."
                 exit 0
                 ;;
