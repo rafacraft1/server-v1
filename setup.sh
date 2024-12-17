@@ -224,11 +224,11 @@ show_report() {
     for component in "${INSTALLED_COMPONENTS[@]}"; do
         echo "- $component"
     done
-    echo "\nVersi komponen:"
+    echo "Versi komponen:"
     apache2 -v | grep "Server version"
     php -v | head -n 1
     mysql --version
-    echo "\nTerima kasih telah menggunakan skrip ini."
+    echo "Terima kasih telah menggunakan skrip ini."
 
     # Periksa dan hapus file info.php jika ada
     if [ -f "$INFO_PHP_PATH" ]; then
