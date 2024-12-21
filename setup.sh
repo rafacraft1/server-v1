@@ -7,7 +7,7 @@ export IS_SETUP_SH=$(echo 'secure_hash_value' | sha256sum | awk '{print $1}')
 SCRIPTS_DIR="./scripts"
 
 # URL repository GitHub
-GITHUB_REPO_RAW="https://raw.githubusercontent.com/username/repo-name/branch-name/scripts"
+GITHUB_REPO_RAW="https://github.com/rafacraft1/server-v1/branch-name/scripts"
 
 # Daftar file skrip yang diperlukan
 REQUIRED_SCRIPTS=("utils.sh" "update_system.sh" "install_apache2.sh" "install_php.sh" "install_database.sh" "install_composer.sh")
